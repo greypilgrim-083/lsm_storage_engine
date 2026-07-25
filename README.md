@@ -167,8 +167,8 @@ sudo apt install -y build-essential cmake git g++
 Navigate to your workspace directory inside WSL and compile using CMake:
 
 ```bash
-# Navigate to the project directory in WSL
-cd /mnt/d/lsm_storage_engine/MiniLevelDB
+# Navigate to the project directory
+cd MiniLevelDB
 
 # Create and configure build directory
 mkdir -p build && cd build
@@ -183,7 +183,7 @@ make -j$(nproc)
 Unit tests are built using **GoogleTest** (automatically fetched via CMake):
 
 ```bash
-# From the /mnt/d/lsm_storage_engine/MiniLevelDB/build directory:
+# From the build directory:
 ctest --output-on-failure
 
 # Or run the GoogleTest binary directly:
@@ -195,7 +195,7 @@ ctest --output-on-failure
 Microbenchmarks are powered by **Google Benchmark**:
 
 ```bash
-# From the /mnt/d/lsm_storage_engine/MiniLevelDB/build directory:
+# From the build directory:
 ./benchmarks/minidb_bench
 ```
 
@@ -209,7 +209,7 @@ Microbenchmarks are powered by **Google Benchmark**:
 
 ```powershell
 # Navigate to project directory
-cd d:\lsm_storage_engine\MiniLevelDB
+cd MiniLevelDB
 
 # Configure & build with CMake
 cmake -B build -S .
