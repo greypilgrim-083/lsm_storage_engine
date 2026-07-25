@@ -1,0 +1,44 @@
+# CMake
+CMakeCache.txt
+CMakeFiles
+CMakeScripts
+Testing
+Makefile
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+build/
+
+# VS/NMake/IDE
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+
+# MinGW/MSVC Objects & binaries
+*.o
+*.obj
+*.exe
+*.dll
+*.lib
+*.a
+*.pdb
+
+# Data / Bench directories
+bench_db_dir/
+bench_db_random/
+test_db_dir/
+data_dir/
+
+# Editor
+.vscode/
+.idea/
+
+# System
+.DS_Store
+Thumbs.db
