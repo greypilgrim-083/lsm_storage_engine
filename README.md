@@ -42,7 +42,7 @@ flowchart TD
     end
 
     subgraph MemoryFlush [Memory Flush]
-        MemTable -->|Flush when size > threshold| SST_L0["Level 0 SSTables (Disk)"]
+        MemTable -->|"Flush when size > threshold"| SST_L0["Level 0 SSTables (Disk)"]
     end
 
     subgraph ReadPath [Read Path]
@@ -51,13 +51,13 @@ flowchart TD
         MemTable -->|2. Miss| SST_L0
         SST_L0 -->|3. Check Filter| BloomFilter{"Bloom Filter"}
         BloomFilter -->|Hit| SSTIndex["SST Index Lookup"]
-        BloomFilter -->|Miss (Drop)| ReturnNull["Return Not Found"]
+        BloomFilter -->|"Miss (Drop)"| ReturnNull["Return Not Found"]
         SSTIndex --> DiskRead["Read Data Block"]
     end
 
     subgraph BackgroundCompaction [Background Compaction]
         SST_L0 -->|Compaction Thread| SST_L1["Level 1 SSTables (Disk)"]
-        SST_L1 -->|Merge & Deduplicate| SST_L2["Level 2 SSTables (Disk)"]
+        SST_L1 -->|"Merge & Deduplicate"| SST_L2["Level 2 SSTables (Disk)"]
     end
 ```
 
