@@ -5,6 +5,7 @@
 #include "metrics.h"
 #include <filesystem>
 #include <iostream>
+#include <algorithm>
 
 namespace minidb {
 
@@ -15,6 +16,39 @@ DBImpl::DBImpl(const std::string& db_path) : db_path_(db_path) {
 
     wal_ = std::make_unique<WAL>(db_path_ + "/wal.log");
     wal_->Recover(memtable_);
+
+    // Load existing SSTables
+    for (const auto& entry : std::filesystem::directory_iterator(db_path_)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".sst") {
+            std::string filename = entry.path().filename().string();
+            if (filename.find("L0_") == 0) {
+                levels_[0].push_back(entry.path().string());
+            } else if (filename.find("L1_") == 0) {
+                levels_[1].push_back(entry.path().string());
+            }
+            
+            size_t underscore = filename.find('_');
+            size_t dot = filename.find('.');
+            if (underscore != std::string::npos && dot != std::string::npos) {
+                uint64_t id = std::stoull(filename.substr(underscore + 1, dot - underscore - 1));
+                if (id >= next_file_id_) {
+                    next_file_id_ = id + 1;
+                }
+            }
+        }
+    }
+    
+    auto sort_func = [](const std::string& a, const std::string& b) {
+        auto get_id = [](const std::string& path) {
+            std::string filename = std::filesystem::path(path).filename().string();
+            size_t underscore = filename.find('_');
+            size_t dot = filename.find('.');
+            return std::stoull(filename.substr(underscore + 1, dot - underscore - 1));
+        };
+        return get_id(a) < get_id(b);
+    };
+    std::sort(levels_[0].begin(), levels_[0].end(), sort_func);
+    std::sort(levels_[1].begin(), levels_[1].end(), sort_func);
 
     // Start background compaction thread
     compaction_thread_ = std::thread(&DBImpl::BackgroundCompactionLoop, this);

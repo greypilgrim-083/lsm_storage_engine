@@ -13,11 +13,17 @@ BloomFilter::BloomFilter(size_t expected_items, double false_positive_rate) {
 }
 
 BloomFilter::BloomFilter(const std::string& serialized) {
-    if (serialized.size() < sizeof(size_t)) return;
-    num_hashes_ = *reinterpret_cast<const size_t*>(serialized.data());
+    if (serialized.size() < sizeof(size_t) * 2) return;
     
-    bits_.resize((serialized.size() - sizeof(size_t)) * 8, false);
-    const uint8_t* byte_data = reinterpret_cast<const uint8_t*>(serialized.data() + sizeof(size_t));
+    const char* ptr = serialized.data();
+    num_hashes_ = *reinterpret_cast<const size_t*>(ptr);
+    ptr += sizeof(size_t);
+    
+    size_t num_bits = *reinterpret_cast<const size_t*>(ptr);
+    ptr += sizeof(size_t);
+    
+    bits_.resize(num_bits, false);
+    const uint8_t* byte_data = reinterpret_cast<const uint8_t*>(ptr);
     for (size_t i = 0; i < bits_.size(); ++i) {
         if (byte_data[i / 8] & (1 << (i % 8))) {
             bits_[i] = true;
@@ -51,6 +57,9 @@ bool BloomFilter::PossiblyContains(const std::string& key) const {
 std::string BloomFilter::Serialize() const {
     std::string out;
     out.append(reinterpret_cast<const char*>(&num_hashes_), sizeof(num_hashes_));
+    
+    size_t num_bits = bits_.size();
+    out.append(reinterpret_cast<const char*>(&num_bits), sizeof(num_bits));
     
     size_t num_bytes = (bits_.size() + 7) / 8;
     std::vector<uint8_t> bytes(num_bytes, 0);
