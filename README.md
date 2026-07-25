@@ -33,7 +33,7 @@ The architecture follows standard Log-Structured Merge-tree principles:
 
 ```mermaid
 flowchart TD
-    subgraph Write Path
+    subgraph WritePath [Write Path]
         ClientWrite["Client (Put / Delete)"]
         WAL["Write-Ahead Log (WAL)"]
         MemTable["In-Memory MemTable (std::map)"]
@@ -41,11 +41,11 @@ flowchart TD
         ClientWrite -->|2. Insert/Update| MemTable
     end
 
-    subgraph Memory Flush
+    subgraph MemoryFlush [Memory Flush]
         MemTable -->|Flush when size > threshold| SST_L0["Level 0 SSTables (Disk)"]
     end
 
-    subgraph Read Path
+    subgraph ReadPath [Read Path]
         ClientRead["Client (Get)"]
         ClientRead -->|1. Search| MemTable
         MemTable -->|2. Miss| SST_L0
@@ -55,7 +55,7 @@ flowchart TD
         SSTIndex --> DiskRead["Read Data Block"]
     end
 
-    subgraph Background Compaction
+    subgraph BackgroundCompaction [Background Compaction]
         SST_L0 -->|Compaction Thread| SST_L1["Level 1 SSTables (Disk)"]
         SST_L1 -->|Merge & Deduplicate| SST_L2["Level 2 SSTables (Disk)"]
     end
