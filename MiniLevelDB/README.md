@@ -6,24 +6,24 @@
 ![Benchmarks](https://img.shields.io/badge/benchmarks-Google%20Benchmark-red.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-**MiniLevelDB** is a lightweight, high-performance, embedded Log-Structured Merge-tree (LSM-tree) key-value storage engine implemented in modern **C++17**. Inspired by the architectures of **LevelDB** and **RocksDB**, MiniLevelDB is designed to handle write-heavy workloads efficiently while offering fast read access through in-memory caching, SSTable indexing, probabilistic Bloom filters, and background level compaction.
+**MiniLevelDB** is a lightweight, embedded Log-Structured Merge-tree (LSM-tree) key-value storage engine implemented in modern **C++17**. Inspired by the architectures of **LevelDB** and **RocksDB**, MiniLevelDB is designed to handle write-heavy workloads efficiently while offering fast read access through SSTable indexing, probabilistic Bloom filters, and background compaction.
 
 ---
 
 ## 🌟 Key Features
 
 - ⚡ **High Write Throughput**: Converts random writes into fast, sequential disk writes using an in-memory buffer (MemTable) paired with an append-only Write-Ahead Log (WAL).
-- 🛡️ **ACID Durability & Recovery**: Guarantees persistence via sequential WAL logs. On startup, automatically recovers un-flushed data into the MemTable.
-- 🔒 **Thread-Safe Memory Layer**: Uses standard `std::shared_mutex` read-write locks for high-concurrency `Put`, `Get`, and `Delete` operations.
-- 💾 **Immutable SSTables (Sorted String Tables)**: Flushes sorted data blocks to disk with explicit sparse indexing for binary search retrieval.
-- 🌸 **Probabilistic Bloom Filters**: Embedded into SSTable footers to dramatically eliminate unnecessary disk reads for non-existent keys, minimizing Read Amplification.
-- 🔄 **Asynchronous Compaction Engine**: Runs a dedicated background compaction thread (`BackgroundCompactionLoop`) to merge overlapping SSTables across LSM levels (L0, L1, etc.), purging tombstones and old versions to reclaim disk space and control Read/Space Amplification.
+- 🛡️ **Crash Recovery via WAL**: On startup, automatically replays the Write-Ahead Log to restore any un-flushed MemTable data that was not yet written to an SSTable.
+- 🔒 **Thread-Safe Architecture**: A `std::mutex` in `DBImpl` serializes all `Put`, `Get`, and `Delete` operations. The MemTable additionally uses a `std::shared_mutex` for fine-grained read-write separation at the memory layer.
+- 💾 **Sparse-Indexed SSTables (Sorted String Tables)**: Flushes sorted key-value data to disk with a sparse block index (one entry per 64 keys) for efficient binary search retrieval.
+- 🌸 **Probabilistic Bloom Filters**: Embedded per SSTable to eliminate unnecessary disk reads for non-existent keys, minimizing Read Amplification. Sized using the optimal formula for a 1% false positive rate.
+- 🔄 **Background Compaction Engine**: Runs a dedicated background thread (`BackgroundCompactionLoop`) to merge L0 SSTables into L1 when L0 accumulates 4 or more files, deduplicating keys and purging tombstones.
 - 📊 **Real-time Telemetry & Metrics**: Native performance counters (`Metrics` singleton & `ScopedTimer`) measuring:
   - **Write Amplification Factor (WAF)**
-  - **Read Amplification / Bloom Filter Drop Rate**
+  - **Bloom Filter Drop Rate**
   - **P99 Put & Get Latency (microseconds)**
   - **Disk I/O Bytes Written**
-- 🧪 **Comprehensive Benchmarking & Testing**: Ships with GoogleTest suites for functionality verification and Google Benchmark microbenchmarks for performance analysis under synthetic & random workloads.
+- 🧪 **Benchmarking & Testing**: Ships with GoogleTest suites for functionality verification and Google Benchmark microbenchmarks for performance analysis under sequential and random-key workloads.
 
 ---
 
@@ -42,7 +42,7 @@ flowchart TD
     end
 
     subgraph Memory Flush
-        MemTable -->|Flush when size > threshold| SST_L0["Level 0 SSTables (Disk)"]
+        MemTable -->|Flush when size > 4MB| SST_L0["Level 0 SSTables (Disk)"]
     end
 
     subgraph Read Path
@@ -50,14 +50,13 @@ flowchart TD
         ClientRead -->|1. Search| MemTable
         MemTable -->|2. Miss| SST_L0
         SST_L0 -->|3. Check Filter| BloomFilter{"Bloom Filter"}
-        BloomFilter -->|Hit| SSTIndex["SST Index Lookup"]
-        BloomFilter -->|Miss (Drop)| ReturnNull["Return Not Found"]
-        SSTIndex --> DiskRead["Read Data Block"]
+        BloomFilter -->|Hit| SSTIndex["SST Index Lookup (Binary Search)"]
+        BloomFilter -->|Miss - Skip File| ReturnNull["Return Not Found"]
+        SSTIndex --> DiskRead["Read Data Block (Linear Scan ≤64 keys)"]
     end
 
     subgraph Background Compaction
-        SST_L0 -->|Compaction Thread| SST_L1["Level 1 SSTables (Disk)"]
-        SST_L1 -->|Merge & Deduplicate| SST_L2["Level 2 SSTables (Disk)"]
+        SST_L0 -->|"Compaction Thread (≥4 L0 files)"| SST_L1["Level 1 SSTables (Disk)"]
     end
 ```
 
@@ -65,13 +64,13 @@ flowchart TD
 
 | Component | Responsibility | Technical Details |
 | :--- | :--- | :--- |
-| **`MemTable`** | Write buffer in RAM | Backed by `std::map`, thread-safe via `std::shared_mutex` |
-| **`WAL`** | Durability log on disk | Sequential append-only file with recovery parsing |
-| **`SSTableBuilder`** | Writes sorted KV blocks | Constructs sorted data blocks, index offsets, and Bloom Filter |
-| **`SSTableReader`** | Reads SSTables from disk | Caches index block and deserializes Bloom Filter footer |
-| **`BloomFilter`** | Probabilistic membership check | Multi-hash function bit-array (default 1% false positive rate) |
-| **`CompactionJob`** | SSTable merging | Merges overlapping multi-file key ranges and purges tombstones |
-| **`Metrics`** | Engine telemetry | Tracks disk bytes, user bytes, latency distributions, and drop rates |
+| **`MemTable`** | Write buffer in RAM | Backed by `std::map` (Red-Black Tree, sorted), thread-safe via `std::shared_mutex` |
+| **`WAL`** | Crash recovery log on disk | Sequential append-only binary file; replayed into MemTable on startup |
+| **`SSTableBuilder`** | Writes sorted KV data to disk | Constructs sorted data records, sparse index block, Bloom filter, and 16-byte footer |
+| **`SSTableReader`** | Reads SSTables from disk | Loads index and Bloom filter into memory at construction; data blocks stay on disk |
+| **`BloomFilter`** | Probabilistic membership check | Multi-hash bit-array with math-derived sizing (default 1% false positive rate) |
+| **`CompactionJob`** | L0 → L1 SSTable merging | Merges all L0 files into one L1 file; deduplicates and drops tombstones |
+| **`Metrics`** | Engine telemetry | Atomic counters for bytes and SSTable queries; mutex-protected latency vectors for P99 |
 
 ---
 
@@ -84,7 +83,7 @@ MiniLevelDB/
 │   ├── bloom_filter.h        # Probabilistic filter declaration
 │   ├── compaction_job.h      # Multi-SSTable merging interface
 │   ├── db_impl.h             # Core DBImpl engine interface
-│   ├── memtable.h            # In-memory skip/map table
+│   ├── memtable.h            # In-memory map-based table
 │   ├── metrics.h             # Telemetry & P99 latency tracking
 │   ├── sstable_builder.h     # SSTable disk builder
 │   ├── sstable_reader.h      # SSTable disk reader & index lookup
@@ -94,19 +93,19 @@ MiniLevelDB/
 │   ├── core/
 │   │   └── db_impl.cpp       # Main database logic & background compaction worker
 │   ├── mem/
-│   │   ├── memtable.cpp      # Concurrent MemTable operations
+│   │   ├── memtable.cpp      # MemTable read/write operations
 │   │   └── wal.cpp           # WAL logging & crash recovery
 │   ├── disk/
 │   │   ├── bloom_filter.cpp  # Bit vector & multi-hashing implementation
 │   │   ├── sstable_builder.cpp # Disk block serialisation
-│   │   └── sstable_reader.cpp  # SSTable deserialization & binary search
+│   │   └── sstable_reader.cpp  # SSTable deserialisation & binary search
 │   ├── compaction/
-│   │   └── compaction_job.cpp # Merge-sort compaction execution
+│   │   └── compaction_job.cpp # L0 → L1 merge-sort compaction
 │   └── telemetry/
 │       └── metrics.cpp       # Telemetry aggregation & latency calculations
 ├── tests/
 │   ├── CMakeLists.txt
-│   └── test_main.cpp         # GoogleTest suite (Put/Get, Delete, WAL, Flush)
+│   └── test_main.cpp         # GoogleTest suite (Put/Get, Delete, WAL recovery, Flush)
 └── benchmarks/
     ├── CMakeLists.txt
     └── bench_main.cpp        # Google Benchmark suite (Write amp, P99 latency, Bloom Filter efficiency)
@@ -139,7 +138,7 @@ int main() {
 
     // 4. Update / Delete keys
     db.Delete("user_1002");
-    
+
     // 5. Inspect Engine Telemetry
     auto& metrics = minidb::Metrics::GetInstance();
     std::cout << "Write Amplification: " << metrics.GetWriteAmplification() << std::endl;
@@ -228,24 +227,31 @@ ctest --output-on-failure
 
 ## 📈 Benchmark Results & Performance Profile
 
-### Benchmark Output (`Google Benchmark`)
+Benchmarks run on: **12-core CPU @ 2496 MHz**, L1=48KiB×6, L2=1280KiB×6, L3=12MB
 
-```text
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Benchmark                               Time             CPU   Iterations   Disk_Bytes_Written   ReadBloomFilterDropRate   WriteAmplification   p99_Get_Latency_us   p99_Put_Latency_us
-------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-BM_LSM_HeavyWrite/10000               195 ms         23.3 ms           31             88.6204M                         0              1.03244                0.866              559.788
+### BM_LSM_HeavyWrite — 10,000 Sequential Inserts (256-byte values, 10 iterations)
+
+```
+Benchmark                    Time        CPU    Iterations
+BM_LSM_HeavyWrite/10000    311 ms     34.2 ms      10
+
+Disk_Bytes_Written    = 30.47 MB
+WriteAmplification    = 1.10x
+BloomFilterDropRate   = 0        (expected — benchmark reads only existing keys)
+p99_Get_Latency_us    = 0.835 µs
+p99_Put_Latency_us    = 960.065 µs
 ```
 
-### Performance Analysis Summary
+### Performance Analysis
 
-| Metric | Result | Analysis / Engineering Insight |
+| Metric | Result | Engineering Insight |
 | :--- | :--- | :--- |
-| **Batch Write Time** | `195 ms` total (`23.3 ms` CPU) | Demonstrates low CPU overhead with parallel background thread execution. |
-| **Write Amplification (WAF)** | `1.03x` | **Near-Optimal Sequential Disk Writes**. Minimal overhead during sequential batch ingest. |
-| **P99 Get Latency** | `0.866 µs` (~866 ns) | **Sub-Microsecond Read Speed**. Hits in-memory MemTable buffer directly without disk I/O. |
-| **P99 Put Latency** | `559.788 µs` | Sub-millisecond write latency including append-only WAL persistence. |
-| **Total Disk I/O** | `88.62 MB` | Reflects WAL log records + flushed SSTables on disk. |
+| **Wall Time vs CPU Time** | `311 ms` wall / `34.2 ms` CPU | 9× gap — program is I/O-bound, not CPU-bound. Most time is spent waiting on SSTable flush disk writes. |
+| **Write Amplification** | `1.10×` | Low because the same 10k keys are overwritten 10 times; MemTable absorbs repeated updates before flushing. Measured as total disk bytes / WAL bytes. |
+| **P99 Get Latency** | `0.835 µs` | Reads hit the in-memory MemTable directly. Cold-disk reads (SSTable lookup on NVMe) would be ~100–200× slower. |
+| **P99 Put Latency** | `960 µs` | Tail latency is caused by occasional MemTable flush write stalls — the 1% of `Put()` calls that trigger a synchronous SSTable file write. |
+| **Bloom Filter Drop Rate** | `0` | This benchmark reads existing keys. The filter correctly returns "possibly present" for all of them. Run `BM_LSM_RandomBottleneck` with missing keys to observe non-zero drop rates. |
+| **Total Disk I/O** | `30.47 MB` | ~27.6 MB WAL records + ~2.9 MB SSTable flush overhead (index, bloom filter, footer). |
 
 ---
 
@@ -253,10 +259,20 @@ BM_LSM_HeavyWrite/10000               195 ms         23.3 ms           31       
 
 MiniLevelDB features built-in telemetry to monitor key LSM engine health indicators:
 
-- **Write Amplification Factor (WAF)**: Ratio of total bytes written to disk (WAL + Flushes + Compactions) vs bytes submitted by user (`user_bytes_written`).
-- **Read Amplification**: Tracks total SSTables queried per `Get()` operation.
-- **Bloom Filter Drop Rate**: Percentage of non-existent key lookups intercepted by the Bloom Filter before touching disk.
+- **Write Amplification Factor (WAF)**: Ratio of total bytes written to disk (WAL + SSTable flushes + compaction output) to WAL bytes written. A lower value indicates less write overhead.
+- **Bloom Filter Drop Rate**: Fraction of SSTable file opens skipped by the Bloom filter. Most meaningful when measured against a missing-key workload.
 - **P99 Latency**: Microsecond-level 99th percentile latency tracking for `Put` and `Get` calls via RAII `ScopedTimer`.
+- **Disk Bytes Written**: Total raw bytes written to disk across WAL, SSTable flush, and compaction.
+
+---
+
+## ⚠️ Known Limitations
+
+- **2-level LSM only**: Compaction runs L0 → L1. L1 has no size limit and does not compact further. Production engines (LevelDB, RocksDB) use 6–7 levels.
+- **Single global mutex**: All `Put` and `Get` operations are serialized through one `std::mutex` in `DBImpl`. No concurrent reads.
+- **In-memory compaction merge**: All L0 files are loaded into a `std::map` during compaction. RAM usage scales with total L0 data size.
+- **No transaction support**: Each `Put`/`Delete` is its own atomic operation. Multi-key transactions are not supported.
+- **SSTable manifest not persisted**: On restart, existing SSTable files on disk are not reloaded. Only WAL replay is used for recovery.
 
 ---
 
