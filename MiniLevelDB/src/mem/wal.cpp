@@ -28,7 +28,7 @@ void WAL::Append(const std::string& key, const std::string& value) {
     file_.write(key.data(), key_len);
     file_.write(reinterpret_cast<const char*>(&val_len), sizeof(val_len));
     file_.write(value.data(), val_len);
-    // file_.flush(); // Force sync (Disabled for benchmark speed)
+    file_.flush(); // Force sync to disk — required for WAL durability guarantee
 
     uint64_t total_written = sizeof(key_len) + key_len + sizeof(val_len) + val_len;
     
