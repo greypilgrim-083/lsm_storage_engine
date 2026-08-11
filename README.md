@@ -167,15 +167,15 @@ sudo apt install -y build-essential cmake git g++
 Navigate to your workspace directory inside WSL and compile using CMake:
 
 ```bash
-# Navigate to the project directory
 cd MiniLevelDB
-
-# Create and configure build directory
 mkdir -p build && cd build
 cmake -DCMAKE_BUILD_TYPE=Release ..
-
-# Compile target binaries using all CPU cores
 make -j$(nproc)
+
+
+./tests/minidb_tests
+./benchmarks/minidb_bench
+./minidb_demo
 ```
 
 ### 3. Running Unit Tests in WSL
@@ -183,10 +183,6 @@ make -j$(nproc)
 Unit tests are built using **GoogleTest** (automatically fetched via CMake):
 
 ```bash
-# From the build directory:
-ctest --output-on-failure
-
-# Or run the GoogleTest binary directly:
 ./tests/minidb_tests
 ```
 
@@ -195,7 +191,6 @@ ctest --output-on-failure
 Microbenchmarks are powered by **Google Benchmark**:
 
 ```bash
-# From the build directory:
 ./benchmarks/minidb_bench
 ```
 
